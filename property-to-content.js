@@ -46,28 +46,33 @@ async function processPage (page) {
 
   let children = richText
 
+  console.info( page.properties.name?.title?.[0]?.plain_text);
+  console.info(children);
+ console.info('--------------------------')
+
   // Single text node, try to parse it
   if (richText.length === 1) {
     children = markdownToBlocks(richText[0].plain_text)
   }
+  console.info(children);
 
-  await notion.blocks.children.append({
-    block_id: page.id,
-    children
-  })
+  // await notion.blocks.children.append({
+  //   block_id: page.id,
+  //   children
+  // })
 
-  if (remove) {
-    notion.pages.update({
-      page_id: page.id,
-      properties: {
-        [property]: {
-          rich_text: []
-        }
-      }
-    })
-  }
+  // if (remove) {
+  //   notion.pages.update({
+  //     page_id: page.id,
+  //     properties: {
+  //       [property]: {
+  //         rich_text: []
+  //       }
+  //     }
+  //   })
+  // }
 
-  const title = page.properties.Name?.title?.[0]?.plain_text ?? page.id
+  const title = page.properties.name?.title?.[0]?.plain_text ?? page.id
 
   console.log(`Processed: ${title}`)
 }
