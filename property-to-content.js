@@ -23,11 +23,59 @@ const notion = new Client({
   auth: token
 })
 
+// --- POMOCNÁ REKURZIVNÍ FUNKCE ---
+// {
+//   object: 'block',
+//   type: 'bulleted_list_item',
+//   bulleted_list_item: {
+//     rich_text: [ [Object] ],
+//     children: [
+//       [Object], [Object],
+//       [Object], [Object],
+//       [Object], [Object],
+//       [Object]
+//     ]
+//   }
+// }
+
+async function appendRecursive(parentId, blocks) {
+  for (const block of blocks) {
+    // Extrahujeme children a zbytek bloku (vlastnosti jako type, text atd.)
+    //const { children, ...blockData } = block;
+
+    
+    if ( block.bulleted_list_item?.children?.length > 0) {
+      console.info(`blockData WITH children: `, block);
+      const {bulleted_list_item: {children, ...list_data}, ...blockData} = block;
+
+      // 1. Vytvoříme pouze rodičovský blok (bez dětí v tomto callu)
+      const response = await notion.blocks.children.append({
+        block_id: parentId,
+        children: [{
+          ...blockData,
+          bulleted_list_item: list_data,
+        }]
+      });
+
+      // 2. Získáme ID právě vytvořeného bloku (první prvek v poli results)
+      const newBlockId = response.results[0].id;
+
+      // 3. Rekurzivně nahrajeme děti do tohoto nového bloku
+      await appendRecursive(newBlockId, children);
+    } else {
+      console.info(`blockData WITHOUT: `, block);
+      // Blok nemá děti, nahrajeme ho standardně
+      await notion.blocks.children.append({
+        block_id: parentId,
+        children: [block]
+      });
+    }
+  }
+}
+
 async function * paginate (method, params) {
   const result = await method(params)
-
   yield result
-
   if (result.next_cursor) {
     yield * paginate(method, { ...params, start_cursor: result.next_cursor })
   }
@@ -39,42 +87,39 @@ async function processPage (page) {
   }
 
   const richText = page.properties[property].rich_text
-
   if (!richText || richText.length < 1) {
     return
   }
 
-  let children = richText
+  let children = richText;
 
-  console.info( page.properties.name?.title?.[0]?.plain_text);
-  console.info(children);
- console.info('--------------------------')
+  console.info(`Processing: ${page.properties.name?.title?.[0]?.plain_text || page.id}`);
 
-  // Single text node, try to parse it
+  // Pokud je to Markdown string v property, převedeme na bloky
   if (richText.length === 1) {
     children = markdownToBlocks(richText[0].plain_text)
   }
-  console.info(children);
 
-  // await notion.blocks.children.append({
-  //   block_id: page.id,
-  //   children
-  // })
+  // --- ZMĚNA: Místo jednoho append voláme naši rekurzivní funkci ---
+  try {
+    await appendRecursive(page.id, children);
+  } catch (error) {
+    console.error(`Error appending blocks to page ${page.id}:`, error.message);
+  }
 
-  // if (remove) {
-  //   notion.pages.update({
-  //     page_id: page.id,
-  //     properties: {
-  //       [property]: {
-  //         rich_text: []
-  //       }
-  //     }
-  //   })
-  // }
+  if (remove) {
+    await notion.pages.update({
+      page_id: page.id,
+      properties: {
+        [property]: {
+          rich_text: []
+        }
+      }
+    })
+  }
 
   const title = page.properties.name?.title?.[0]?.plain_text ?? page.id
-
-  console.log(`Processed: ${title}`)
+  console.log(`Successfully Processed: ${title}`)
 }
 
 const iterator = paginate(notion.databases.query, { database_id: id })
