@@ -58,7 +58,45 @@ function calculateDepth(blocks) {
   })
 }
 
-async function appendRecursive(parentId, blocks, maxDepth) {
+// returns {maxDepth, blocksCustomStructure, blocksWOChildren}
+//  - original block ?
+//  - depth
+//  - children original
+//  - children w/o their children
+function preprocessBlocks(blocks) {
+  let blocksCustomStructure = [];
+  let blocksWOChildren = []
+  let maxDepth = 0;
+  blocks.each(b => {
+    let bout = {
+      id: null,
+      origBlock: b, //??
+    };
+    let bWOchildren = structuredClone(b);
+     let d;
+    if(b.bulleted_list_item?.children?.length > 0) {
+      d = preprocessBlocks(b.bulleted_list_item.children);
+      delete bWOchildren.bulleted_list_item.children;
+    } else if(b.numbered_list_item?.children?.length > 0) {
+      d = preprocessBlocks(b.numbered_list_item.children);
+      delete bWOchildren.numbered_list_item.children;
+    } else {
+      d = {maxDepth: -1};
+    }
+    bout.maxDepth = d.maxDepth + 1;
+    bout.childrenCustom = d.blocksCustomStructure;
+    bout.childrenWOchildren = d.blocksWOChildren;
+    if(bout.maxDepth > maxDepth) {
+      maxDepth = bout.maxDepth;
+    }
+    
+    blocksCustomStructure.add(bout);
+    blocksWOChildren.add(bWOchildren);
+  })
+  return {maxDepth, blocksCustomStructure, blocksWOChildren};
+}
+
+async function appendRecursive(parentId, blocks, blocksCustom, blocksWOchildren, depth) {
   
     // Extrahujeme children a zbytek bloku (vlastnosti jako type, text atd.)
     //const { children, ...blockData } = block;
@@ -66,19 +104,12 @@ async function appendRecursive(parentId, blocks, maxDepth) {
   if(maxDepth < 3) {
     await notion.blocks.children.append({
         block_id: parentId,
-        children: blocks 
-        // !!! pitome - mam tam tu svou informaci o depth - asi musim cele preprocessnout a ulozit si ve strukture:
-        //  - original block
-        //  - block w/o children
-        //  - depth
-        //  - children (?)
+        children: blocks    
       });
+  } else {
+    // for 1..block.lenght - iterate thru all the arrays...
   }
-  let pureBlocks = [], children = [];
-  blocks.each(b => {
-
-  })
-
+  
     
     // if ( block.bulleted_list_item?.children?.length > 0) {
     //   console.info(`blockData WITH children: `, block);
@@ -136,11 +167,14 @@ async function processPage (page) {
     children = markdownToBlocks(richText[0].plain_text)
   }
 
-  let maxDepth = calculateDepth(children);
+  
+  let {maxDepth, blocksCustomStructure, blocksWOChildren} = preprocessBlocks(children);
+  depth++;
+
 
   // --- ZMĚNA: Místo jednoho append voláme naši rekurzivní funkci ---
   try {
-    await appendRecursive(page.id, children, maxDepth);
+    await appendRecursive(page.id, children, blocksCustomStructure, blocksWOChildren, maxDepth);
   } catch (error) {
     console.error(`Error appending blocks to page ${page.id}:`, error.message);
   }
