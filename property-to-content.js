@@ -38,39 +38,75 @@ const notion = new Client({
 //   }
 // }
 
-async function appendRecursive(parentId, blocks) {
-  for (const block of blocks) {
+function calculateDepth(blocks) {
+  // bulleted_list_item
+  // numbered_list_item
+  let maxDepth = 0;
+  blocks.each(b => {
+    let d = 0;
+    if(b.bulleted_list_item?.children?.length > 0) {
+      d = calculateDepth(b.bulleted_list_item.children) + 1;
+    } else if(b.numbered_list_item?.children?.length > 0) {
+      d = calculateDepth(b.numbered_list_item.children) + 1;
+    } else {
+      d = 0;
+    }
+    b.listDepth = d;
+    if(d > maxDepth) {
+      maxDepth = d;
+    }
+  })
+}
+
+async function appendRecursive(parentId, blocks, maxDepth) {
+  
     // Extrahujeme children a zbytek bloku (vlastnosti jako type, text atd.)
     //const { children, ...blockData } = block;
 
-    
-    if ( block.bulleted_list_item?.children?.length > 0) {
-      console.info(`blockData WITH children: `, block);
-      const {bulleted_list_item: {children, ...list_data}, ...blockData} = block;
-
-      // 1. Vytvoříme pouze rodičovský blok (bez dětí v tomto callu)
-      const response = await notion.blocks.children.append({
+  if(maxDepth < 3) {
+    await notion.blocks.children.append({
         block_id: parentId,
-        children: [{
-          ...blockData,
-          bulleted_list_item: list_data,
-        }]
+        children: blocks 
+        // !!! pitome - mam tam tu svou informaci o depth - asi musim cele preprocessnout a ulozit si ve strukture:
+        //  - original block
+        //  - block w/o children
+        //  - depth
+        //  - children (?)
       });
-
-      // 2. Získáme ID právě vytvořeného bloku (první prvek v poli results)
-      const newBlockId = response.results[0].id;
-
-      // 3. Rekurzivně nahrajeme děti do tohoto nového bloku
-      await appendRecursive(newBlockId, children);
-    } else {
-      console.info(`blockData WITHOUT: `, block);
-      // Blok nemá děti, nahrajeme ho standardně
-      await notion.blocks.children.append({
-        block_id: parentId,
-        children: [block]
-      });
-    }
   }
+  let pureBlocks = [], children = [];
+  blocks.each(b => {
+
+  })
+
+    
+    // if ( block.bulleted_list_item?.children?.length > 0) {
+    //   console.info(`blockData WITH children: `, block);
+    //   const {bulleted_list_item: {children, ...list_data}, ...blockData} = block;
+
+    //   // 1. Vytvoříme pouze rodičovský blok (bez dětí v tomto callu)
+    //   const response = await notion.blocks.children.append({
+    //     block_id: parentId,
+    //     children: [{
+    //       ...blockData,
+    //       bulleted_list_item: list_data,
+    //     }]
+    //   });
+
+    //   // 2. Získáme ID právě vytvořeného bloku (první prvek v poli results)
+    //   const newBlockId = response.results[0].id;
+
+    //   // 3. Rekurzivně nahrajeme děti do tohoto nového bloku
+    //   await appendRecursive(newBlockId, children);
+    // } else {
+    //   console.info(`blockData WITHOUT: `, block);
+    //   // Blok nemá děti, nahrajeme ho standardně
+    //   await notion.blocks.children.append({
+    //     block_id: parentId,
+    //     children: [block]
+    //   });
+    // }
+  
 }
 
 async function * paginate (method, params) {
@@ -100,9 +136,11 @@ async function processPage (page) {
     children = markdownToBlocks(richText[0].plain_text)
   }
 
+  let maxDepth = calculateDepth(children);
+
   // --- ZMĚNA: Místo jednoho append voláme naši rekurzivní funkci ---
   try {
-    await appendRecursive(page.id, children);
+    await appendRecursive(page.id, children, maxDepth);
   } catch (error) {
     console.error(`Error appending blocks to page ${page.id}:`, error.message);
   }
