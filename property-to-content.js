@@ -20,7 +20,8 @@ const property = process.argv[3]
 const remove = process.argv[4] === '--remove'
 
 const notion = new Client({
-  auth: token
+  auth: token,
+  timeoutMs: 120_000
 })
 
 // --- POMOCNÁ REKURZIVNÍ FUNKCE ---
@@ -59,15 +60,23 @@ function calculateDepth(blocks) {
 }
 
 // returns {maxDepth, blocksCustomStructure, blocksWOChildren}
-//  - original block ?
-//  - depth
-//  - children original
-//  - children w/o their children
+// blocksCustomStructure = {
+//   id,
+//   origBlock,
+//   maxDepth,
+//   children,
+//   childrenCustom,
+//   childrenWOchildren
+// }
+
 function preprocessBlocks(blocks) {
   let blocksCustomStructure = [];
   let blocksWOChildren = []
+  let blocksOrig = [];
   let maxDepth = 0;
-  blocks.each(b => {
+  console.info(blocks);
+  console.info(blocks[0].bulleted_list_item?.rich_text);
+  blocks.forEach(b => {
     let bout = {
       id: null,
       origBlock: b, //??
@@ -84,30 +93,69 @@ function preprocessBlocks(blocks) {
       d = {maxDepth: -1};
     }
     bout.maxDepth = d.maxDepth + 1;
+    bout.children = d.blocksOrig;
     bout.childrenCustom = d.blocksCustomStructure;
     bout.childrenWOchildren = d.blocksWOChildren;
     if(bout.maxDepth > maxDepth) {
       maxDepth = bout.maxDepth;
     }
     
-    blocksCustomStructure.add(bout);
-    blocksWOChildren.add(bWOchildren);
-  })
-  return {maxDepth, blocksCustomStructure, blocksWOChildren};
+    blocksCustomStructure.push(bout);
+    blocksWOChildren.push(bWOchildren);
+    blocksOrig.push(b);
+  });
+  return {maxDepth, blocksCustomStructure, blocksWOChildren, blocksOrig};
 }
 
+// function logBlocks(blocks, customFlag = false) {
+//   if(!blocks.length) {
+//     console.log("[]");
+//   } else {
+//     console.log("[")
+//   }
+// }
+
 async function appendRecursive(parentId, blocks, blocksCustom, blocksWOchildren, depth) {
-  
+  let options = {depth: 8};
+  console.log("appendRecursive: ", parentId)
+  console.dir( blocks, options );
+  console.dir( blocksCustom, options);
+  console.dir( blocksWOchildren, options);
+  console.log(depth);
+  console.log("----");
     // Extrahujeme children a zbytek bloku (vlastnosti jako type, text atd.)
     //const { children, ...blockData } = block;
 
-  if(maxDepth < 3) {
-    await notion.blocks.children.append({
+  if(depth < 4) {
+    console.log("Append all: ", blocks);
+    return notion.blocks.children.append({
         block_id: parentId,
         children: blocks    
       });
   } else {
-    // for 1..block.lenght - iterate thru all the arrays...
+    // append blocks without children
+    console.info("Append WO Children: ", blocksWOchildren);
+    let parentBlocks = await notion.blocks.children.append({
+        block_id: parentId,
+        children: blocksWOchildren    
+      });
+    console.log("response: ", parentBlocks.results);
+    // for 1..block.lenght - iterate thru all the arrays and append all the children
+    let resPromises = [];
+    for(let i = 0; i < blocks.length; ++i) {
+      if(blocksCustom[i].maxDepth > 0) {
+        resPromises.push(appendRecursive(
+          parentBlocks.results[i].id,
+          blocksCustom[i].children,
+          blocksCustom[i].childrenCustom,
+          blocksCustom[i].childrenWOchildren,
+          blocksCustom[i].maxDepth
+        ));
+      }
+    }
+
+    return await Promise.all(resPromises);
+    // await all
   }
   
     
@@ -169,8 +217,10 @@ async function processPage (page) {
 
   
   let {maxDepth, blocksCustomStructure, blocksWOChildren} = preprocessBlocks(children);
-  depth++;
-
+  
+  console.log("----------------------------------------------------------------");
+  console.log("----------------------------------------------------------------");
+  console.log("----------------------------------------------------------------");
 
   // --- ZMĚNA: Místo jednoho append voláme naši rekurzivní funkci ---
   try {
