@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { writeFileSync } from 'node:fs'
 import { Client } from '@notionhq/client'
 import { markdownToBlocks } from '@tryfabric/martian'
 
@@ -23,6 +24,9 @@ const notion = new Client({
   auth: token,
   timeoutMs: 120_000
 })
+
+// ------------------------------------------------------------------------------------------------------------------------------
+// pomocne funkce
 
 // --- POMOCNÁ REKURZIVNÍ FUNKCE ---
 // {
@@ -57,8 +61,10 @@ function calculateDepth(blocks) {
       maxDepth = d;
     }
   })
-}
+} // calculateDepth
 
+
+// ---------------------------------
 // returns {maxDepth, blocksCustomStructure, blocksWOChildren}
 // blocksCustomStructure = {
 //   id,
@@ -74,8 +80,9 @@ function preprocessBlocks(blocks) {
   let blocksWOChildren = []
   let blocksOrig = [];
   let maxDepth = 0;
+  console.info("Preprocessing blocks:");
   console.info(blocks);
-  console.info(blocks[0].bulleted_list_item?.rich_text);
+  console.info(blocks[0]?.bulleted_list_item?.rich_text);
   blocks.forEach(b => {
     let bout = {
       id: null,
@@ -105,7 +112,7 @@ function preprocessBlocks(blocks) {
     blocksOrig.push(b);
   });
   return {maxDepth, blocksCustomStructure, blocksWOChildren, blocksOrig};
-}
+} // preprocessBlocks
 
 // function logBlocks(blocks, customFlag = false) {
 //   if(!blocks.length) {
@@ -115,6 +122,7 @@ function preprocessBlocks(blocks) {
 //   }
 // }
 
+// ---------------------------------
 async function appendRecursive(parentId, blocks, blocksCustom, blocksWOchildren, depth) {
   let options = {depth: 8};
   console.log("appendRecursive: ", parentId)
@@ -126,7 +134,7 @@ async function appendRecursive(parentId, blocks, blocksCustom, blocksWOchildren,
     // Extrahujeme children a zbytek bloku (vlastnosti jako type, text atd.)
     //const { children, ...blockData } = block;
 
-  if(depth < 4) {
+  if(depth < 3) {
     console.log("Append all: ", blocks);
     return notion.blocks.children.append({
         block_id: parentId,
@@ -156,7 +164,7 @@ async function appendRecursive(parentId, blocks, blocksCustom, blocksWOchildren,
 
     return await Promise.all(resPromises);
     // await all
-  }
+  } // appendRecursive
   
     
     // if ( block.bulleted_list_item?.children?.length > 0) {
@@ -188,32 +196,44 @@ async function appendRecursive(parentId, blocks, blocksCustom, blocksWOchildren,
   
 }
 
+
+// ---------------------------------
 async function * paginate (method, params) {
   const result = await method(params)
   yield result
   if (result.next_cursor) {
     yield * paginate(method, { ...params, start_cursor: result.next_cursor })
   }
-}
+} // paginate
 
+const pagesWithExistingContent = []
+
+// ---------------------------------
 async function processPage (page) {
   if (!page.properties[property]) {
     return
   }
-
+  const title = page.properties.name?.title?.[0]?.plain_text ?? page.id
   const richText = page.properties[property].rich_text
+
   if (!richText || richText.length < 1) {
+    console.info(`Page does not have content property: ${title}`);
     return
   }
 
-  let children = richText;
-
-  console.info(`Processing: ${page.properties.name?.title?.[0]?.plain_text || page.id}`);
-
-  // Pokud je to Markdown string v property, převedeme na bloky
-  if (richText.length === 1) {
-    children = markdownToBlocks(richText[0].plain_text)
+  const existingContent = await notion.blocks.children.list({ block_id: page.id, page_size: 1 })
+  if (existingContent.results.length > 0) {
+    console.warn(`WARNING: Page already has content, skipping: ${title} (${page.id})`)
+    pagesWithExistingContent.push({ id: page.id, title })
+    return
   }
+
+  console.info(`Processing: ${title}`);
+  console.info(`Rich text len: ${richText.length}`)
+
+  // Notion splits rich_text properties into multiple chunks once the plain
+  // text exceeds ~2000 characters, so always join before parsing as Markdown.
+  const children = markdownToBlocks(richText.map(rt => rt.plain_text).join(''))
 
   
   let {maxDepth, blocksCustomStructure, blocksWOChildren} = preprocessBlocks(children);
@@ -223,13 +243,12 @@ async function processPage (page) {
   console.log("----------------------------------------------------------------");
 
   // --- ZMĚNA: Místo jednoho append voláme naši rekurzivní funkci ---
-  try {
-    await appendRecursive(page.id, children, blocksCustomStructure, blocksWOChildren, maxDepth);
-  } catch (error) {
-    console.error(`Error appending blocks to page ${page.id}:`, error.message);
-  }
+  
 
-  if (remove) {
+  try {
+    
+    await appendRecursive(page.id, children, blocksCustomStructure, blocksWOChildren, maxDepth);
+    if (remove) {
     await notion.pages.update({
       page_id: page.id,
       properties: {
@@ -239,10 +258,21 @@ async function processPage (page) {
       }
     })
   }
+  } catch (error) {
+    console.error(`Error appending blocks to page ${page.id} | ${title}:`, error.message);
+    /// !!!!!! zapsat si error nebo tak neco
+  }
 
-  const title = page.properties.name?.title?.[0]?.plain_text ?? page.id
+  
+
+  
   console.log(`Successfully Processed: ${title}`)
-}
+} // processPage
+
+
+// --------------------------------------------------------------------------------------
+// ------
+// --------------------------------------------------------------------------------------
 
 const iterator = paginate(notion.databases.query, { database_id: id })
 
@@ -250,4 +280,12 @@ for await (const query of iterator) {
   for (const page of query.results) {
     await processPage(page)
   }
+}
+
+if (pagesWithExistingContent.length > 0) {
+  console.warn(`\n${pagesWithExistingContent.length} page(s) already had content and were skipped:`)
+  const lines = pagesWithExistingContent.map(p => `${p.id}\t${p.title}`)
+  lines.forEach(line => console.warn(line))
+  writeFileSync('skipped-pages.txt', lines.join('\n') + '\n')
+  console.warn('Written to skipped-pages.txt')
 }
