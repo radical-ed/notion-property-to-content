@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { writeFileSync } from 'node:fs'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import { markdownToBlocks } from '@tryfabric/martian'
 import { createNotionClient, paginate, getTitleProperty } from './lib/notion.js'
 
@@ -268,6 +268,7 @@ if (pagesWithExistingContent.length > 0) {
   console.warn(`\n${pagesWithExistingContent.length} page(s) already had content and were skipped:`)
   const lines = pagesWithExistingContent.map(p => `${p.id}\t${p.title}`)
   lines.forEach(line => console.warn(line))
-  writeFileSync('skipped-pages.txt', lines.join('\n') + '\n')
-  console.warn('Written to skipped-pages.txt')
+  mkdirSync('out', { recursive: true })
+  writeFileSync('out/skipped-pages.txt', lines.join('\n') + '\n')
+  console.warn('Written to out/skipped-pages.txt')
 }

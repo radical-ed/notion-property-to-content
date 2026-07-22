@@ -59,6 +59,10 @@ with CSV" feature to import new rows, then run the script again. Because
 the content property was emptied after being processed, only the new
 rows will be processed!
 
+Pages that already have content are skipped (a warning is printed) rather
+than having content appended a second time; they're also listed in
+`out/skipped-pages.txt`.
+
 **Note:** I recommend testing the script on test page/database first to
 make sure the way the content is processed works for you.
 
@@ -68,12 +72,12 @@ If you have two databases that originated from the same import and want to
 find out how they've diverged, use `compare-databases.js`:
 
 ```sh
-node compare-databases.js <database-id-a> <database-id-b> [report-parent-page-id]
+node compare-databases.js <database-id-a> <database-id-b> [report-parent-page-id] [options]
 ```
 
 Rows are matched by their title (the database's Title-type property,
-whatever it's named). For every title found in either database, it
-compares:
+whatever it's named). By default, for every title found in either database,
+it compares:
 
 - **Page content** — whether one side is empty while the other has content,
   or both have content but it differs.
@@ -83,9 +87,17 @@ compares:
 - Rows whose title only exists in one of the two databases are reported as
   "Missing in DB A/B".
 
+Options:
+
+- `--no-properties` — don't compare properties.
+- `--no-content` — don't compare page content.
+- `--one-way` — only check that database A's rows made it into B (and are
+  the same). Rows that exist only in B are not reported. Use this when B is
+  a merge target that's expected to contain rows beyond what came from A.
+
 Differences are printed to the console and written to
-`database-differences.tsv`. If you pass a `report-parent-page-id` (the ID of
-a Notion page to create the report under) and differences were found, it
-will ask for confirmation before creating a report page there containing
+`out/database-differences.tsv`. If you pass a `report-parent-page-id` (the
+ID of a Notion page to create the report under) and differences were found,
+it will ask for confirmation before creating a report page there containing
 a table with, for each difference: the title, links to the row in both
 databases, and the type(s) of difference found.
