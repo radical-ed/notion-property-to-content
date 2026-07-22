@@ -61,3 +61,31 @@ rows will be processed!
 
 **Note:** I recommend testing the script on test page/database first to
 make sure the way the content is processed works for you.
+
+## Comparing two databases
+
+If you have two databases that originated from the same import and want to
+find out how they've diverged, use `compare-databases.js`:
+
+```sh
+node compare-databases.js <database-id-a> <database-id-b> [report-parent-page-id]
+```
+
+Rows are matched by their title (the database's Title-type property,
+whatever it's named). For every title found in either database, it
+compares:
+
+- **Page content** — whether one side is empty while the other has content,
+  or both have content but it differs.
+- **Properties** — any property whose value differs between the two rows.
+  Relations, rollups, formulas, and other computed/ID-based properties are
+  skipped since they aren't meaningful to compare across two databases.
+- Rows whose title only exists in one of the two databases are reported as
+  "Missing in DB A/B".
+
+Differences are printed to the console and written to
+`database-differences.tsv`. If you pass a `report-parent-page-id` (the ID of
+a Notion page to create the report under) and differences were found, it
+will ask for confirmation before creating a report page there containing
+a table with, for each difference: the title, links to the row in both
+databases, and the type(s) of difference found.

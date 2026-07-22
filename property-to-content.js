@@ -1,18 +1,11 @@
 #!/usr/bin/env node
 
 import { writeFileSync } from 'node:fs'
-import { Client } from '@notionhq/client'
 import { markdownToBlocks } from '@tryfabric/martian'
+import { createNotionClient, paginate, getTitleProperty } from './lib/notion.js'
 
 if (process.argv.length < 4) {
   console.error('Usage: node property-to-content.js <database-id> <property> [--remove]')
-  process.exit(1)
-}
-
-const token = process.env.NOTION_TOKEN
-
-if (!token) {
-  console.error('Missing NOTION_TOKEN in environment')
   process.exit(1)
 }
 
@@ -20,10 +13,7 @@ const id = process.argv[2]
 const property = process.argv[3]
 const remove = process.argv[4] === '--remove'
 
-const notion = new Client({
-  auth: token,
-  timeoutMs: 120_000
-})
+const notion = createNotionClient()
 
 // ------------------------------------------------------------------------------------------------------------------------------
 // pomocne funkce
@@ -197,15 +187,6 @@ async function appendRecursive(parentId, blocks, blocksCustom, blocksWOchildren,
 }
 
 
-// ---------------------------------
-async function * paginate (method, params) {
-  const result = await method(params)
-  yield result
-  if (result.next_cursor) {
-    yield * paginate(method, { ...params, start_cursor: result.next_cursor })
-  }
-} // paginate
-
 const pagesWithExistingContent = []
 
 // ---------------------------------
@@ -213,7 +194,8 @@ async function processPage (page) {
   if (!page.properties[property]) {
     return
   }
-  const title = page.properties.name?.title?.[0]?.plain_text ?? page.id
+  const titleProperty = getTitleProperty(page.properties)
+  const title = titleProperty?.title?.[0]?.plain_text ?? page.id
   const richText = page.properties[property].rich_text
 
   if (!richText || richText.length < 1) {
