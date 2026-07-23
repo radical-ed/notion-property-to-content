@@ -2,7 +2,7 @@
 
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { markdownToBlocks } from '@tryfabric/martian'
-import { createNotionClient, paginate, getTitleProperty, getDataSourceId } from './lib/notion.js'
+import { createNotionClient, paginate, getTitleProperty, getDataSourceId, appendBlocksRecursive } from './lib/notion.js'
 
 if (process.argv.length < 4) {
   console.error('Usage: node property-to-content.js <database-id> <property> [--remove]')
@@ -28,172 +28,18 @@ function escapeAmbiguousListMarkers (markdown) {
   return markdown.replace(/^(\s*[-*+]\s+)(\d+)([.)])(\s)/gm, '$1$2\\$3$4')
 }
 
-// --- POMOCNÁ REKURZIVNÍ FUNKCE ---
-// {
-//   object: 'block',
-//   type: 'bulleted_list_item',
-//   bulleted_list_item: {
-//     rich_text: [ [Object] ],
-//     children: [
-//       [Object], [Object],
-//       [Object], [Object],
-//       [Object], [Object],
-//       [Object]
-//     ]
-//   }
-// }
-
-function calculateDepth(blocks) {
-  // bulleted_list_item
-  // numbered_list_item
-  let maxDepth = 0;
-  blocks.each(b => {
-    let d = 0;
-    if(b.bulleted_list_item?.children?.length > 0) {
-      d = calculateDepth(b.bulleted_list_item.children) + 1;
-    } else if(b.numbered_list_item?.children?.length > 0) {
-      d = calculateDepth(b.numbered_list_item.children) + 1;
-    } else {
-      d = 0;
-    }
-    b.listDepth = d;
-    if(d > maxDepth) {
-      maxDepth = d;
+// Converts martian's markdownToBlocks output - blocks with a nested
+// `children` array under `block[block.type].children` - into the
+// { payload, children } shape appendBlocksRecursive (lib/notion.js) expects,
+// which strips `children` out into its own field regardless of block type.
+function toBlockTree (blocks) {
+  return blocks.map(block => {
+    const { children = [], ...body } = block[block.type] ?? {}
+    return {
+      payload: { ...block, [block.type]: body },
+      children: toBlockTree(children)
     }
   })
-} // calculateDepth
-
-
-// ---------------------------------
-// returns {maxDepth, blocksCustomStructure, blocksWOChildren}
-// blocksCustomStructure = {
-//   id,
-//   origBlock,
-//   maxDepth,
-//   children,
-//   childrenCustom,
-//   childrenWOchildren
-// }
-
-function preprocessBlocks(blocks) {
-  let blocksCustomStructure = [];
-  let blocksWOChildren = []
-  let blocksOrig = [];
-  let maxDepth = 0;
-  console.info("Preprocessing blocks:");
-  console.info(blocks);
-  console.info(blocks[0]?.bulleted_list_item?.rich_text);
-  blocks.forEach(b => {
-    let bout = {
-      id: null,
-      origBlock: b, //??
-    };
-    let bWOchildren = structuredClone(b);
-     let d;
-    if(b.bulleted_list_item?.children?.length > 0) {
-      d = preprocessBlocks(b.bulleted_list_item.children);
-      delete bWOchildren.bulleted_list_item.children;
-    } else if(b.numbered_list_item?.children?.length > 0) {
-      d = preprocessBlocks(b.numbered_list_item.children);
-      delete bWOchildren.numbered_list_item.children;
-    } else {
-      d = {maxDepth: -1};
-    }
-    bout.maxDepth = d.maxDepth + 1;
-    bout.children = d.blocksOrig;
-    bout.childrenCustom = d.blocksCustomStructure;
-    bout.childrenWOchildren = d.blocksWOChildren;
-    if(bout.maxDepth > maxDepth) {
-      maxDepth = bout.maxDepth;
-    }
-    
-    blocksCustomStructure.push(bout);
-    blocksWOChildren.push(bWOchildren);
-    blocksOrig.push(b);
-  });
-  return {maxDepth, blocksCustomStructure, blocksWOChildren, blocksOrig};
-} // preprocessBlocks
-
-// function logBlocks(blocks, customFlag = false) {
-//   if(!blocks.length) {
-//     console.log("[]");
-//   } else {
-//     console.log("[")
-//   }
-// }
-
-// ---------------------------------
-async function appendRecursive(parentId, blocks, blocksCustom, blocksWOchildren, depth) {
-  let options = {depth: 8};
-  console.log("appendRecursive: ", parentId)
-  console.dir( blocks, options );
-  console.dir( blocksCustom, options);
-  console.dir( blocksWOchildren, options);
-  console.log(depth);
-  console.log("----");
-    // Extrahujeme children a zbytek bloku (vlastnosti jako type, text atd.)
-    //const { children, ...blockData } = block;
-
-  if(depth < 3) {
-    console.log("Append all: ", blocks);
-    return notion.blocks.children.append({
-        block_id: parentId,
-        children: blocks    
-      });
-  } else {
-    // append blocks without children
-    console.info("Append WO Children: ", blocksWOchildren);
-    let parentBlocks = await notion.blocks.children.append({
-        block_id: parentId,
-        children: blocksWOchildren    
-      });
-    console.log("response: ", parentBlocks.results);
-    // for 1..block.lenght - iterate thru all the arrays and append all the children
-    let resPromises = [];
-    for(let i = 0; i < blocks.length; ++i) {
-      if(blocksCustom[i].maxDepth > 0) {
-        resPromises.push(appendRecursive(
-          parentBlocks.results[i].id,
-          blocksCustom[i].children,
-          blocksCustom[i].childrenCustom,
-          blocksCustom[i].childrenWOchildren,
-          blocksCustom[i].maxDepth
-        ));
-      }
-    }
-
-    return await Promise.all(resPromises);
-    // await all
-  } // appendRecursive
-  
-    
-    // if ( block.bulleted_list_item?.children?.length > 0) {
-    //   console.info(`blockData WITH children: `, block);
-    //   const {bulleted_list_item: {children, ...list_data}, ...blockData} = block;
-
-    //   // 1. Vytvoříme pouze rodičovský blok (bez dětí v tomto callu)
-    //   const response = await notion.blocks.children.append({
-    //     block_id: parentId,
-    //     children: [{
-    //       ...blockData,
-    //       bulleted_list_item: list_data,
-    //     }]
-    //   });
-
-    //   // 2. Získáme ID právě vytvořeného bloku (první prvek v poli results)
-    //   const newBlockId = response.results[0].id;
-
-    //   // 3. Rekurzivně nahrajeme děti do tohoto nového bloku
-    //   await appendRecursive(newBlockId, children);
-    // } else {
-    //   console.info(`blockData WITHOUT: `, block);
-    //   // Blok nemá děti, nahrajeme ho standardně
-    //   await notion.blocks.children.append({
-    //     block_id: parentId,
-    //     children: [block]
-    //   });
-    // }
-  
 }
 
 
@@ -226,21 +72,10 @@ async function processPage (page) {
   // Notion splits rich_text properties into multiple chunks once the plain
   // text exceeds ~2000 characters, so always join before parsing as Markdown.
   const markdown = escapeAmbiguousListMarkers(richText.map(rt => rt.plain_text).join(''))
-  const children = markdownToBlocks(markdown)
-
-  
-  let {maxDepth, blocksCustomStructure, blocksWOChildren} = preprocessBlocks(children);
-  
-  console.log("----------------------------------------------------------------");
-  console.log("----------------------------------------------------------------");
-  console.log("----------------------------------------------------------------");
-
-  // --- ZMĚNA: Místo jednoho append voláme naši rekurzivní funkci ---
-  
+  const blocks = markdownToBlocks(markdown)
 
   try {
-    
-    await appendRecursive(page.id, children, blocksCustomStructure, blocksWOChildren, maxDepth);
+    await appendBlocksRecursive(notion, page.id, toBlockTree(blocks));
     if (remove) {
     await notion.pages.update({
       page_id: page.id,
@@ -256,9 +91,6 @@ async function processPage (page) {
     /// !!!!!! zapsat si error nebo tak neco
   }
 
-  
-
-  
   console.log(`Successfully Processed: ${title}`)
 } // processPage
 

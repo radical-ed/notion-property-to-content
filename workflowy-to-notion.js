@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
-import { createNotionClient } from './lib/notion.js'
+import { createNotionClient, appendBlocksRecursive } from './lib/notion.js'
 import { resolveShare, fetchTree, fetchOwnerId, resolveImageUrl, downloadImage } from './lib/workflowy.js'
-import { htmlToRichText, uploadImageToNotion, appendBlocksRecursive } from './lib/notion-blocks.js'
+import { htmlToRichText, uploadImageToNotion } from './lib/notion-blocks.js'
 
 if (process.argv.length < 4) {
   console.error('Usage: node workflowy-to-notion.js <workflowy-share-url> <notion-parent-page-id>')
