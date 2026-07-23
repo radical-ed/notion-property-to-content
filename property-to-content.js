@@ -2,7 +2,7 @@
 
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { markdownToBlocks } from '@tryfabric/martian'
-import { createNotionClient, paginate, getTitleProperty } from './lib/notion.js'
+import { createNotionClient, paginate, getTitleProperty, getDataSourceId } from './lib/notion.js'
 
 if (process.argv.length < 4) {
   console.error('Usage: node property-to-content.js <database-id> <property> [--remove]')
@@ -267,7 +267,8 @@ async function processPage (page) {
 // ------
 // --------------------------------------------------------------------------------------
 
-const iterator = paginate(notion.databases.query, { database_id: id })
+const dataSourceId = await getDataSourceId(notion, id)
+const iterator = paginate(notion.dataSources.query, { data_source_id: dataSourceId })
 
 for await (const query of iterator) {
   for (const page of query.results) {

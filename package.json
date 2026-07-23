@@ -1,7 +1,7 @@
 {
   "type": "module",
   "dependencies": {
-    "@notionhq/client": "^1.0.4",
+    "@notionhq/client": "^5.23.2",
     "@tryfabric/martian": "^1.2.0"
   }
 }

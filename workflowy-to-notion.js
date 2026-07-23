@@ -14,7 +14,6 @@ const notionParentPageId = process.argv[3]
 const IMAGE_CONCURRENCY = 4
 
 const notion = createNotionClient()
-const notionToken = process.env.NOTION_TOKEN
 
 // ------------------------------------------------------------------------------------------------------------------------------
 
@@ -129,7 +128,7 @@ await mapWithConcurrency(imageItems, IMAGE_CONCURRENCY, async (item) => {
   const contentType = item.metadata.s3File.fileType
   const signedUrl = await withRetry(() => resolveImageUrl(ownerId, item.id, cookieHeader))
   const { buffer } = await withRetry(() => downloadImage(signedUrl))
-  const fileUploadId = await withRetry(() => uploadImageToNotion(notionToken, buffer, fileName, contentType))
+  const fileUploadId = await withRetry(() => uploadImageToNotion(notion, buffer, fileName, contentType))
   fileUploadIds.set(item.id, fileUploadId)
 })
 console.info('All images uploaded')
