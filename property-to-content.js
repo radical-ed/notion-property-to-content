@@ -18,6 +18,16 @@ const notion = createNotionClient()
 // ------------------------------------------------------------------------------------------------------------------------------
 // pomocne funkce
 
+// Markdown like "- 1. Skupiny munice" is ambiguous: CommonMark parses the
+// "1." right after the bullet marker as a nested ordered list rather than as
+// literal text, so martian's parseList (which expects a paragraph as the
+// item's first child) silently drops the whole item. These numbers are
+// clause labels from the source legal text, not real ordered lists (they
+// don't increment), so escape the period/paren to keep them as plain text.
+function escapeAmbiguousListMarkers (markdown) {
+  return markdown.replace(/^(\s*[-*+]\s+)(\d+)([.)])(\s)/gm, '$1$2\\$3$4')
+}
+
 // --- POMOCNÁ REKURZIVNÍ FUNKCE ---
 // {
 //   object: 'block',
@@ -215,7 +225,8 @@ async function processPage (page) {
 
   // Notion splits rich_text properties into multiple chunks once the plain
   // text exceeds ~2000 characters, so always join before parsing as Markdown.
-  const children = markdownToBlocks(richText.map(rt => rt.plain_text).join(''))
+  const markdown = escapeAmbiguousListMarkers(richText.map(rt => rt.plain_text).join(''))
+  const children = markdownToBlocks(markdown)
 
   
   let {maxDepth, blocksCustomStructure, blocksWOChildren} = preprocessBlocks(children);
