@@ -101,3 +101,61 @@ ID of a Notion page to create the report under) and differences were found,
 it will ask for confirmation before creating a report page there containing
 a table with, for each difference: the title, links to the row in both
 databases, and the type(s) of difference found.
+
+## Archiving pages to a backup Notion account
+
+If you want to move content out of one Notion account's search entirely
+(e.g. to a rarely-used backup account) without losing it, use
+`archive-to-backup.js`:
+
+```sh
+node archive-to-backup.js <source-root-page-id> <destination-parent-page-id> [options]
+```
+
+Point `<source-root-page-id>` at a "root archive" page in your primary
+account — every page (and database) that's a **direct child** of that page
+is treated as one archive unit, whole subtree included. For each one, the
+script:
+
+1. Copies it, and everything nested under it (pages, databases and their
+   rows, images/files, etc.), into `<destination-parent-page-id>` in the
+   backup account.
+2. Validates that the copy matches the source (title and content).
+3. Blanks out the original: all of its content is trashed (which, since a
+   page's sub-pages are just more of its content, removes the whole nested
+   subtree from the source account in one step), its title is prefixed with
+   `[archived] `, and one paragraph linking to the new copy is left behind.
+
+You need two Notion integrations, one invited to the source page and one to
+the destination page, with their tokens set as:
+
+```sh
+read NOTION_TOKEN
+read NOTION_BACKUP_TOKEN
+export NOTION_TOKEN         # source account
+export NOTION_BACKUP_TOKEN  # destination (backup) account
+```
+
+Options:
+
+- `--dry-run` — copy and validate, but don't touch the source. Useful to
+  preview a run first.
+- `--yes` — skip the "are you sure" confirmation prompt.
+- `--mode=archive` — the default, and the only mode currently implemented.
+
+Re-running the script on the same root page is safe: anything already
+prefixed with `[archived] ` is detected and skipped, so an interrupted or
+partial run can just be re-run to pick up where it left off.
+
+Some content can't be faithfully copied across two different Notion
+accounts (synced blocks, mentions of users/pages/databases, non-portable
+database property types like relations or status). Those are skipped rather
+than failing the whole page — every run writes a timestamped log to
+`out/archive-log-<timestamp>.txt` with a summary and the full detail of
+anything skipped or failed, so you can review it afterwards.
+
+See `docs/plans/2026-07-23-notion-archive-to-backup-account.md` for the
+design rationale, including what's explicitly out of scope for now (database
+views/filters, full mention rewriting) and notes on extending this to
+multiple source roots or a non-destructive "backup" (copy without removing
+the original) mode in the future.
