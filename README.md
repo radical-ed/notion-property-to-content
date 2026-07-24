@@ -159,3 +159,59 @@ design rationale, including what's explicitly out of scope for now (database
 views/filters, full mention rewriting) and notes on extending this to
 multiple source roots or a non-destructive "backup" (copy without removing
 the original) mode in the future.
+
+## Reapplying a database template to existing pages
+
+Notion has no built-in way to re-push edits to a database's "new item"
+template onto pages that were already created from it - editing the template
+only affects pages created afterward. `reapply-template.js` merges the
+current template's structure onto every existing row instead:
+
+```sh
+node reapply-template.js <database-id> [options]
+```
+
+For each row, the template's top-level headers (headings and toggles) are
+matched against the row's own content:
+
+- A **toggle wrapping a linked database view** (e.g. an "Actions" section
+  showing that row's filtered actions) has its view's filter, property
+  visibility/order, sorts and group-by reapplied from the template every
+  time - a view's config is meant to always match the template, not
+  accumulate local drift. Relation filters that reference "this page" in the
+  template (Notion's dynamic per-page filter) are correctly rewritten to
+  reference the actual target page.
+- A **plain heading** (e.g. "Project description & notes") is only *added*
+  if missing; if it's already there, it - and whatever the user wrote under
+  it - is left untouched. This is the merge behavior: never clobber freeform
+  content, but keep structural sections and view configs in sync.
+
+Options:
+
+- `--properties` / `--content-only` - whether to also overwrite non-empty
+  template property values onto each row (relations, select/status, etc.).
+  Off by default; if neither flag is passed and the terminal is interactive,
+  you're asked at the start. Meant to be used sparingly - it overwrites
+  whatever the row currently has for any property the template sets.
+- `--template=<name-or-id>` - pick a specific template when a data source has
+  more than one. If omitted and there's more than one, you're asked to
+  choose interactively (or the default template is used if the data source
+  has one flagged as default and you're not running interactively).
+- `--only=<page-id>[,<page-id>...]` - restrict the run to specific row(s).
+  Useful to validate on one row before running the whole database.
+- `--dry-run` - compute and print what would happen, without writing.
+- `--yes` - skip the confirmation prompt.
+
+**API limitation to know about**: a brand-new linked database view can only
+be created as a direct child of a page, never nested inside a newly created
+toggle. So if a row is missing a view-section entirely, the script recreates
+it as a heading/toggle followed immediately by the view as a sibling block -
+functionally identical (same filtered, configured view) but not visually
+collapsible together like the template's. Every such case is called out in
+the run's log and console summary.
+
+Logs live to `out/reapply-template-log-<timestamp>.txt` as each row
+finishes, with a per-action-type summary and duration at the end. See
+`docs/plans/2026-07-24-notion-reapply-template.md` for the full design
+rationale, including what was tested and ruled out (Notion's own
+`template_id` apply API turned out to be a no-op for this use case).
