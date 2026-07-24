@@ -60,6 +60,8 @@ const ctx = {
   destNotion: createNotionClient(process.env.NOTION_BACKUP_TOKEN)
 }
 
+const runStartedAt = Date.now()
+
 // --------------------------------------------------------------------------------------
 
 console.info(`Discovering archive targets under ${sourceRootId}...`)
@@ -118,11 +120,26 @@ const succeeded = results.filter(r => r.status === 'ok')
 const failed = results.filter(r => r.status === 'failed')
 const skipped = results.filter(r => r.status === 'skipped')
 const totalWarnings = results.reduce((sum, r) => sum + (r.warnings?.length ?? 0), 0)
+const finishedAt = new Date()
+const durationText = formatDuration(finishedAt.getTime() - runStartedAt)
 
 console.info(`\nDone: ${succeeded.length} succeeded, ${skipped.length} skipped, ${failed.length} failed, ${totalWarnings} warning(s) logged.`)
+console.info(`Finished at ${finishedAt.toISOString()} (took ${durationText}).`)
 
-appendFileSync(logPath, buildSummary(results))
+appendFileSync(logPath, buildSummary(results, finishedAt, durationText))
 console.info(`\nFull log at ${logPath}`)
+
+function formatDuration (ms) {
+  const totalSeconds = Math.round(ms / 1000)
+  const hours = Math.floor(totalSeconds / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  const seconds = totalSeconds % 60
+  const parts = []
+  if (hours > 0) parts.push(`${hours}h`)
+  if (hours > 0 || minutes > 0) parts.push(`${minutes}m`)
+  parts.push(`${seconds}s`)
+  return parts.join(' ')
+}
 
 // A target can succeed overall (title/content validation passed) while
 // still having plenty of individual pieces - a database row, a nested
@@ -158,7 +175,7 @@ function formatResultBlock (result) {
   return lines.join('\n') + '\n'
 }
 
-function buildSummary (results) {
+function buildSummary (results, finishedAt, durationText) {
   const allWarnings = results.flatMap(r => r.warnings ?? [])
   const warningsByType = {}
   for (const w of allWarnings) {
@@ -167,6 +184,7 @@ function buildSummary (results) {
   }
 
   const lines = ['', '=== Summary ===']
+  lines.push(`Finished: ${finishedAt.toISOString()} (took ${durationText})`)
   lines.push(`Targets found: ${results.length}`)
   lines.push(`Succeeded: ${results.filter(r => r.status === 'ok').length}`)
   lines.push(`Skipped: ${results.filter(r => r.status === 'skipped').length}`)
